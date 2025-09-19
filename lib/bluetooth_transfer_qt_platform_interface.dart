@@ -75,6 +75,10 @@ abstract class BluetoothTransferQtPlatform extends PlatformInterface {
     );
   }
 
+  Stream<List<int>> listenToRawData(String deviceAddress) {
+    throw UnimplementedError('listenToRawData() has not been implemented.');
+  }
+
   void stopScan() {
     throw UnimplementedError('stopScan() has not been implemented.');
   }

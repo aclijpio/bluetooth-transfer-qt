@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'bluetooth_transfer_qt_platform_interface.dart';
 import 'models/bluetooth_device.dart';
@@ -72,11 +73,43 @@ class BluetoothTransferQt {
     );
   }
 
+  Stream<List<int>> listenToRawData(String deviceAddress) {
+    return BluetoothTransferQtPlatform.instance.listenToRawData(deviceAddress);
+  }
+
+  Stream<BluetoothMessage> listenToMessages(String deviceAddress) {
+    return listenToRawData(deviceAddress).map((rawData) {
+      try {
+        final dataString = String.fromCharCodes(rawData);
+        return BluetoothMessage(
+          type: 'text',
+          content: dataString.trim(),
+          metadata: {
+            'timestamp': DateTime.now().toIso8601String(),
+            'rawData': rawData,
+          },
+        );
+      } catch (e) {
+        return BluetoothMessage(
+          type: 'binary',
+          data: Uint8List.fromList(rawData),
+          metadata: {
+            'timestamp': DateTime.now().toIso8601String(),
+            'error': e.toString(),
+          },
+        );
+      }
+    });
+  }
+
   void stopScan() {
     BluetoothTransferQtPlatform.instance.stopScan();
   }
 
-  Future<bool> sendMessage(String deviceAddress, BluetoothMessage message,) async {
+  Future<bool> sendMessage(
+    String deviceAddress,
+    BluetoothMessage message,
+  ) async {
     final processedMessage = await _processOutgoingMessage(message);
     return BluetoothTransferQtPlatform.instance.sendMessage(
       deviceAddress,

@@ -195,6 +195,8 @@ public class BluetoothServerManager {
 
                         @Override
                         public void onMessageReceived(String deviceAddress, byte[] data) {
+                            plugin.sendRawDataEvent(deviceAddress, data);
+                            
                             messageHandler.processIncomingData(deviceAddress, data, new MessageHandler.MessageListener() {
                                 @Override
                                 public void onMessageProcessed(String deviceAddress, java.util.Map<String, Object> message) {

@@ -22,6 +22,7 @@ class MethodChannelBluetoothTransferQt extends BluetoothTransferQtPlatform {
   ErrorCallback? _errorCallback;
 
   StreamSubscription<dynamic>? _eventSubscription;
+  final Map<String, StreamController<List<int>>> _rawDataStreams = {};
 
   MethodChannelBluetoothTransferQt() {
     _setupEventChannel();
@@ -90,6 +91,16 @@ class MethodChannelBluetoothTransferQt extends BluetoothTransferQtPlatform {
             final message = BluetoothMessage.fromJson(data);
             _messageReceivedCallback!(message);
           }
+        }
+        break;
+      case 'rawDataReceived':
+        final deviceAddress = eventMap['deviceAddress'] as String?;
+        final rawData = eventMap['data'] as List<dynamic>?;
+        if (deviceAddress != null &&
+            rawData != null &&
+            _rawDataStreams.containsKey(deviceAddress)) {
+          final bytes = rawData.cast<int>();
+          _rawDataStreams[deviceAddress]!.add(bytes);
         }
         break;
       case 'connectionStateChanged':
@@ -346,8 +357,21 @@ class MethodChannelBluetoothTransferQt extends BluetoothTransferQtPlatform {
     return result ?? false;
   }
 
+  @override
+  Stream<List<int>> listenToRawData(String deviceAddress) {
+    if (!_rawDataStreams.containsKey(deviceAddress)) {
+      _rawDataStreams[deviceAddress] = StreamController<List<int>>.broadcast();
+    }
+    return _rawDataStreams[deviceAddress]!.stream;
+  }
+
   void dispose() {
     _eventSubscription?.cancel();
     _eventSubscription = null;
+
+    for (final controller in _rawDataStreams.values) {
+      controller.close();
+    }
+    _rawDataStreams.clear();
   }
 }

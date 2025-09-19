@@ -217,6 +217,8 @@ public class BluetoothClientManager {
 
                         @Override
                         public void onMessageReceived(String deviceAddress, byte[] data) {
+                            plugin.sendRawDataEvent(deviceAddress, data);
+                            
                             messageHandler.processIncomingData(deviceAddress, data, new MessageHandler.MessageListener() {
                                 @Override
                                 public void onMessageProcessed(String deviceAddress, Map<String, Object> message) {

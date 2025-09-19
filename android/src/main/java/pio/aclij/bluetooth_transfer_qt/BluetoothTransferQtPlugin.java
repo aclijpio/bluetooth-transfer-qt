@@ -508,6 +508,19 @@ public class BluetoothTransferQtPlugin implements FlutterPlugin, MethodCallHandl
         sendEvent("messageReceived", message);
     }
 
+    public void sendRawDataEvent(String deviceAddress, byte[] data) {
+        Map<String, Object> eventData = new HashMap<>();
+        eventData.put("deviceAddress", deviceAddress);
+        
+        Integer[] dataArray = new Integer[data.length];
+        for (int i = 0; i < data.length; i++) {
+            dataArray[i] = data[i] & 0xFF;
+        }
+        eventData.put("data", java.util.Arrays.asList(dataArray));
+        
+        sendEvent("rawDataReceived", eventData);
+    }
+
     public void sendErrorEvent(String error) {
         Map<String, Object> data = new HashMap<>();
         data.put("error", error);
