@@ -1,10 +1,19 @@
-plugins {
-    id("com.android.library")
-    id("dev.flutter.flutter-gradle-plugin")
-}
-
 group = "pio.aclij.bluetooth_transfer_qt"
 version = "1.0"
+
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localProperties.load(localPropertiesFile.newDataInputStream())
+}
+
+def flutterRoot = localProperties.getProperty('flutter.sdk')
+if (flutterRoot == null) {
+    throw new GradleException("Flutter SDK not found. Define location with flutter.sdk in the local.properties file.")
+}
+
+apply plugin: 'com.android.library'
+apply from: "$flutterRoot/packages/flutter_tools/gradle/flutter.gradle"
 
 android {
     namespace = "pio.aclij.bluetooth_transfer_qt"
