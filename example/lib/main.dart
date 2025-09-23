@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:bluetooth_transfer_qt/bluetooth_transfer_qt.dart';
-import 'universal_example.dart';
 
 void main() {
   runApp(const MyApp());
@@ -126,25 +125,6 @@ class _MyAppState extends State<MyApp> {
                     Text('• File transfer with progress'),
                     Text('• SOLID principle compliance'),
                   ],
-                ),
-              ),
-              const SizedBox(height: 32),
-              ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const UniversalBluetoothExample(),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.play_arrow),
-                label: const Text('Open Demo'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 12,
-                  ),
                 ),
               ),
               const SizedBox(height: 16),

@@ -1,30 +1,21 @@
+plugins {
+    id("com.android.library")
+}
+
 group = "pio.aclij.bluetooth_transfer_qt"
 version = "1.0"
 
-buildscript {
-    repositories {
-        google()
-        mavenCentral()
-    }
-
-    dependencies {
-        classpath("com.android.tools.build:gradle:8.9.1")
-    }
-}
-
-rootProject.allprojects {
+allprojects {
     repositories {
         google()
         mavenCentral()
     }
 }
-
-apply plugin: "com.android.library"
 
 android {
     namespace = "pio.aclij.bluetooth_transfer_qt"
 
-    compileSdk = 36
+    compileSdk = 34
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -44,6 +35,10 @@ android {
             }
         }
     }
+}
+
+flutter {
+    source = "../.."
 }
 
 dependencies {

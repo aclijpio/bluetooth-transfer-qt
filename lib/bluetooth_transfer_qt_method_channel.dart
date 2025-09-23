@@ -47,9 +47,8 @@ class MethodChannelBluetoothTransferQt extends BluetoothTransferQtPlatform {
         if (value is Map) {
           converted[skey] = _toStringKeyedMap(value);
         } else if (value is List) {
-          converted[skey] = value
-              .map((e) => e is Map ? _toStringKeyedMap(e) : e)
-              .toList();
+          converted[skey] =
+              value.map((e) => e is Map ? _toStringKeyedMap(e) : e).toList();
         } else {
           converted[skey] = value;
         }

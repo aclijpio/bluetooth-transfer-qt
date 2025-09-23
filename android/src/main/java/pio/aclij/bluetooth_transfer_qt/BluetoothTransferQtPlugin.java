@@ -32,13 +32,15 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
+import io.flutter.embedding.engine.plugins.activity.ActivityAware;
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding;
 import io.flutter.plugin.common.EventChannel;
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
 
-public class BluetoothTransferQtPlugin implements FlutterPlugin, MethodCallHandler {
+public class BluetoothTransferQtPlugin implements FlutterPlugin, MethodCallHandler, ActivityAware {
     private static final String TAG = "BluetoothTransferQt";
     private static final String CHANNEL_NAME = "bluetooth_transfer_qt";
     private static final String EVENT_CHANNEL_NAME = "bluetooth_transfer_qt/events";
@@ -50,6 +52,7 @@ public class BluetoothTransferQtPlugin implements FlutterPlugin, MethodCallHandl
     private EventChannel eventChannel;
     private Context context;
     private BluetoothAdapter bluetoothAdapter;
+    private ActivityPluginBinding activityBinding;
     
     private ExecutorService serverExecutor;
     private ScheduledExecutorService scheduledExecutor;
@@ -340,12 +343,44 @@ public class BluetoothTransferQtPlugin implements FlutterPlugin, MethodCallHandl
         Log.d(TAG, "Plugin cleaned up");
     }
     private boolean isBluetoothEnabled() {
-        return bluetoothAdapter != null && bluetoothAdapter.isEnabled();
+        if (bluetoothAdapter == null) return false;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                // If we lack BLUETOOTH_CONNECT, isEnabled() may throw; catch below
+                if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
+                    != PackageManager.PERMISSION_GRANTED) {
+                    // Best effort: still attempt isEnabled(); if it throws, we'll catch
+                }
+            }
+            return bluetoothAdapter.isEnabled();
+        } catch (SecurityException e) {
+            Log.w(TAG, "SecurityException checking isEnabled", e);
+            return false;
+        }
     }
 
     private boolean enableBluetooth() {
         if (bluetoothAdapter == null) return false;
-        return bluetoothAdapter.enable();
+        if (isBluetoothEnabled()) return true;
+
+        try {
+            // Prefer system dialog which works for non-privileged apps
+            if (activityBinding != null && activityBinding.getActivity() != null) {
+                Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+                activityBinding.getActivity().startActivityForResult(enableBtIntent, 2001);
+                return true;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to launch enable BT intent, falling back to adapter.enable()", e);
+        }
+
+        // Fallback: may be ignored on newer Android versions but works on older ones
+        try {
+            return bluetoothAdapter.enable();
+        } catch (SecurityException e) {
+            Log.e(TAG, "SecurityException enabling bluetooth", e);
+            return false;
+        }
     }
 
     private boolean setDeviceName(String name) {
@@ -555,6 +590,8 @@ public class BluetoothTransferQtPlugin implements FlutterPlugin, MethodCallHandl
             String[] permissions = {
                 Manifest.permission.BLUETOOTH,
                 Manifest.permission.BLUETOOTH_ADMIN,
+                // Accept coarse or fine on pre-S for discovery
+                Manifest.permission.ACCESS_COARSE_LOCATION,
                 Manifest.permission.ACCESS_FINE_LOCATION
             };
             
@@ -582,9 +619,32 @@ public class BluetoothTransferQtPlugin implements FlutterPlugin, MethodCallHandl
                    ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED &&
                    ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
         } else {
-            return ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED &&
-                   ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED &&
-                   ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+            boolean hasBt = ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED;
+            boolean hasAdmin = ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED;
+            boolean hasFine = ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+            boolean hasCoarse = ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+            return hasBt && hasAdmin && (hasFine || hasCoarse);
         }
+    }
+
+    // ActivityAware implementation
+    @Override
+    public void onAttachedToActivity(@NonNull ActivityPluginBinding binding) {
+        this.activityBinding = binding;
+    }
+
+    @Override
+    public void onDetachedFromActivityForConfigChanges() {
+        this.activityBinding = null;
+    }
+
+    @Override
+    public void onReattachedToActivityForConfigChanges(@NonNull ActivityPluginBinding binding) {
+        this.activityBinding = binding;
+    }
+
+    @Override
+    public void onDetachedFromActivity() {
+        this.activityBinding = null;
     }
 }

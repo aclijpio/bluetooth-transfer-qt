@@ -81,10 +81,12 @@ public class BluetoothClientManager {
             return false;
         }
 
-        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
-            Log.e(TAG, "Bluetooth adapter is null or not enabled");
-            notifyScanFailed("Bluetooth not available or not enabled");
-            return false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ECLAIR) {
+            if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
+                Log.e(TAG, "Bluetooth adapter is null or not enabled");
+                notifyScanFailed("Bluetooth not available or not enabled");
+                return false;
+            }
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -95,12 +97,15 @@ public class BluetoothClientManager {
                 return false;
             }
         } else {
-            if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH) 
-                != PackageManager.PERMISSION_GRANTED ||
-                ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADMIN) 
-                != PackageManager.PERMISSION_GRANTED ||
-                ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) 
-                != PackageManager.PERMISSION_GRANTED) {
+            boolean hasBt = ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH)
+                == PackageManager.PERMISSION_GRANTED;
+            boolean hasAdmin = ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADMIN)
+                == PackageManager.PERMISSION_GRANTED;
+            boolean hasFine = ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED;
+            boolean hasCoarse = ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED;
+            if (!hasBt || !hasAdmin || !(hasFine || hasCoarse)) {
                 Log.e(TAG, "Bluetooth permissions not granted (Pre-Android 12)");
                 notifyScanFailed("Bluetooth permissions not granted");
                 return false;
@@ -114,8 +119,11 @@ public class BluetoothClientManager {
             addPairedDevices();
 
             setupDiscoveryReceiver();
-            boolean started = bluetoothAdapter.startDiscovery();
-            
+            boolean started = false;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ECLAIR) {
+                started = bluetoothAdapter.startDiscovery();
+            }
+
             if (!started) {
                 Log.e(TAG, "Failed to start discovery");
                 isScanning.set(false);
@@ -143,8 +151,10 @@ public class BluetoothClientManager {
         }
 
         try {
-            if (bluetoothAdapter.isDiscovering()) {
-                bluetoothAdapter.cancelDiscovery();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ECLAIR) {
+                if (bluetoothAdapter.isDiscovering()) {
+                    bluetoothAdapter.cancelDiscovery();
+                }
             }
 
             if (discoveryReceiver != null) {
@@ -165,16 +175,46 @@ public class BluetoothClientManager {
     }
 
     public CompletableFuture<Boolean> connectToDevice(String deviceAddress) {
-        CompletableFuture<Boolean> future = new CompletableFuture<>();
+        CompletableFuture<Boolean> future = null;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            future = new CompletableFuture<>();
+        }
 
         if (connectionManager.isConnected(deviceAddress)) {
             Log.d(TAG, "Already connected to device: " + deviceAddress);
-            future.complete(true);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                future.complete(true);
+            }
             return future;
         }
 
         executor.submit(() -> {
             try {
+                // Cancel discovery to speed up and stabilize RFCOMM connect
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ECLAIR) {
+                    try {
+                        if (bluetoothAdapter.isDiscovering()) {
+                            bluetoothAdapter.cancelDiscovery();
+                        }
+                    } catch (SecurityException ignored) {
+                    }
+                }
+
+                // Permission checks for connect
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
+                        != PackageManager.PERMISSION_GRANTED) {
+                        throw new SecurityException("BLUETOOTH_CONNECT permission not granted");
+                    }
+                } else {
+                    if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH)
+                        != PackageManager.PERMISSION_GRANTED ||
+                        ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADMIN)
+                        != PackageManager.PERMISSION_GRANTED) {
+                        throw new SecurityException("Bluetooth permissions not granted");
+                    }
+                }
+
                 BluetoothDevice device = bluetoothAdapter.getRemoteDevice(deviceAddress);
                 BluetoothSocket socket = createSocket(device);
                 
@@ -328,8 +368,15 @@ public class BluetoothClientManager {
     }
 
     private void addPairedDevices() {
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH) 
-            != PackageManager.PERMISSION_GRANTED) {
+        boolean hasPermission;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            hasPermission = ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
+                == PackageManager.PERMISSION_GRANTED;
+        } else {
+            hasPermission = ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH)
+                == PackageManager.PERMISSION_GRANTED;
+        }
+        if (!hasPermission) {
             return;
         }
 
@@ -378,8 +425,15 @@ public class BluetoothClientManager {
         Map<String, Object> deviceMap = new HashMap<>();
         deviceMap.put("address", device.getAddress());
         
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH) 
-            == PackageManager.PERMISSION_GRANTED) {
+        boolean namePermission;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            namePermission = ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
+                == PackageManager.PERMISSION_GRANTED;
+        } else {
+            namePermission = ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH)
+                == PackageManager.PERMISSION_GRANTED;
+        }
+        if (namePermission) {
             deviceMap.put("name", device.getName());
         }
         
@@ -390,9 +444,16 @@ public class BluetoothClientManager {
     }
 
     private BluetoothSocket createSocket(BluetoothDevice device) throws IOException {
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH) 
-            != PackageManager.PERMISSION_GRANTED) {
-            throw new SecurityException("Bluetooth permission not granted");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
+                != PackageManager.PERMISSION_GRANTED) {
+                throw new SecurityException("BLUETOOTH_CONNECT permission not granted");
+            }
+        } else {
+            if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH)
+                != PackageManager.PERMISSION_GRANTED) {
+                throw new SecurityException("Bluetooth permission not granted");
+            }
         }
         
         return device.createRfcommSocketToServiceRecord(UUID.fromString(DEFAULT_SERVICE_UUID));
