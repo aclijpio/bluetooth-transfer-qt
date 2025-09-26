@@ -63,6 +63,52 @@ public class ConnectionManager {
         }
         return false;
     }
+    
+    public boolean sendCommand(String deviceAddress, String command) {
+        ConnectionHandler handler = connections.get(deviceAddress);
+        if (handler == null) {
+            Log.w(TAG, "No connection found for device: " + deviceAddress);
+            return false;
+        }
+        
+        try {
+            return handler.sendCommand(command);
+        } catch (Exception e) {
+            Log.e(TAG, "Error sending command to " + deviceAddress, e);
+            return false;
+        }
+    }
+    
+    public boolean sendData(String deviceAddress, byte[] data) {
+        ConnectionHandler handler = connections.get(deviceAddress);
+        if (handler == null) {
+            Log.w(TAG, "No connection found for device: " + deviceAddress);
+            return false;
+        }
+        
+        try {
+            return handler.sendData(data);
+        } catch (Exception e) {
+            Log.e(TAG, "Error sending data to " + deviceAddress, e);
+            return false;
+        }
+    }
+
+    public void pauseReading(String deviceAddress) {
+        ConnectionHandler handler = connections.get(deviceAddress);
+        if (handler != null) {
+            handler.setReadingPaused(true);
+            Log.d(TAG, "Paused reading for device: " + deviceAddress);
+        }
+    }
+
+    public void resumeReading(String deviceAddress) {
+        ConnectionHandler handler = connections.get(deviceAddress);
+        if (handler != null) {
+            handler.setReadingPaused(false);
+            Log.d(TAG, "Resumed reading for device: " + deviceAddress);
+        }
+    }
 
     public BluetoothSocket getConnection(String deviceAddress) {
         ConnectionHandler handler = connections.get(deviceAddress);
@@ -70,6 +116,10 @@ public class ConnectionManager {
     }
 
     public boolean isConnected(String deviceAddress) {
+        if (deviceAddress == null) {
+            Log.w(TAG, "Device address is null in isConnected()");
+            return false;
+        }
         ConnectionHandler handler = connections.get(deviceAddress);
         return handler != null && handler.isConnected();
     }
@@ -107,6 +157,7 @@ public class ConnectionManager {
         private final ConnectionListener listener;
         private final long connectTime;
         private volatile boolean running = true;
+        private volatile boolean readingPaused = false;
         private volatile boolean connected = false;
         private ScheduledFuture<?> heartbeatTask;
         private long lastHeartbeat;
@@ -136,11 +187,15 @@ public class ConnectionManager {
                 startHeartbeat();
 
                 try (InputStream inputStream = socket.getInputStream()) {
-                    byte[] buffer = new byte[8192];
+                    byte[] buffer = new byte[32768];
                     int bytesRead;
 
                     while (running && socket.isConnected()) {
                         try {
+                            if (readingPaused) {
+                                try { Thread.sleep(10); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                                continue;
+                            }
                             bytesRead = inputStream.read(buffer);
                             if (bytesRead > 0) {
                                 bytesReceived += bytesRead;
@@ -188,6 +243,10 @@ public class ConnectionManager {
                 connected = false;
                 notifyDisconnected();
             }
+        }
+
+        public void setReadingPaused(boolean paused) {
+            this.readingPaused = paused;
         }
 
         private boolean attemptReconnect() {
@@ -265,6 +324,45 @@ public class ConnectionManager {
             stats.put("lastHeartbeat", lastHeartbeat);
             stats.put("reconnectAttempts", reconnectAttempts);
             return stats;
+        }
+        
+        public boolean sendCommand(String command) {
+            if (!isConnected()) {
+                return false;
+            }
+            
+            try {
+                OutputStream out = socket.getOutputStream();
+                byte[] commandBytes = (command + "\n").getBytes("UTF-8");
+                out.write(commandBytes);
+                out.flush();
+                bytesSent += commandBytes.length;
+                Log.d(TAG, "Sent command to " + deviceAddress + ": " + command);
+                return true;
+            } catch (IOException e) {
+                Log.e(TAG, "Error sending command to " + deviceAddress, e);
+                notifyError("Failed to send command: " + e.getMessage());
+                return false;
+            }
+        }
+        
+        public boolean sendData(byte[] data) {
+            if (!isConnected()) {
+                return false;
+            }
+            
+            try {
+                OutputStream out = socket.getOutputStream();
+                out.write(data);
+                out.flush();
+                bytesSent += data.length;
+                Log.d(TAG, "Sent " + data.length + " bytes to " + deviceAddress);
+                return true;
+            } catch (IOException e) {
+                Log.e(TAG, "Error sending data to " + deviceAddress, e);
+                notifyError("Failed to send data: " + e.getMessage());
+                return false;
+            }
         }
 
         public void close() {

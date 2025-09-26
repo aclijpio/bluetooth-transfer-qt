@@ -2,6 +2,7 @@ package pio.aclij.bluetooth_transfer_qt;
 
 import android.util.Log;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -185,10 +186,32 @@ public class MessageHandler {
         while (keys.hasNext()) {
             String key = keys.next();
             Object value = json.get(key);
-            if (value instanceof JSONObject) {
+            
+            if (value == JSONObject.NULL) {
+                map.put(key, null);
+            } else if (value instanceof JSONObject) {
                 map.put(key, jsonToMap((JSONObject) value));
-            } else {
+            } else if (value instanceof JSONArray) {
+                // Handle JSON arrays if needed in the future
                 map.put(key, value);
+            } else {
+                // Convert any JSONObject internal types to proper values
+                if (value != null && value.getClass().getName().contains("JSONObject$")) {
+                    // This handles JSONObject$1 and similar internal classes
+                    try {
+                        if (value instanceof Map) {
+                            @SuppressWarnings("unchecked")
+                            Map<String, Object> mapValue = (Map<String, Object>) value;
+                            map.put(key, new HashMap<>(mapValue));
+                        } else {
+                            map.put(key, value.toString());
+                        }
+                    } catch (Exception e) {
+                        map.put(key, value.toString());
+                    }
+                } else {
+                    map.put(key, value);
+                }
             }
         }
         

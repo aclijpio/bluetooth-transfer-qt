@@ -244,9 +244,13 @@ public class BluetoothServerManager {
         
         Log.d(TAG, "Received message from " + deviceAddress + " of type: " + messageType);
 
-        @SuppressWarnings("unchecked")
-        java.util.Map<String, Object> metadata = (java.util.Map<String, Object>) message.get("metadata");
-        if (metadata == null) {
+        java.util.Map<String, Object> metadata;
+        Object metadataObj = message.get("metadata");
+        if (metadataObj instanceof java.util.Map) {
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> metadataMap = (java.util.Map<String, Object>) metadataObj;
+            metadata = metadataMap;
+        } else {
             metadata = new java.util.HashMap<>();
             message.put("metadata", metadata);
         }

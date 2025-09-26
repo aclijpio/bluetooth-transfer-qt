@@ -41,7 +41,9 @@ class DeviceInfo {
       osVersion: json['osVersion'] as String?,
       model: json['model'] as String?,
       manufacturer: json['manufacturer'] as String?,
-      customFields: json['customFields'] as Map<String, dynamic>?,
+      customFields: json['customFields'] != null && json['customFields'] is Map
+          ? Map<String, dynamic>.from(json['customFields'])
+          : null,
     );
   }
 

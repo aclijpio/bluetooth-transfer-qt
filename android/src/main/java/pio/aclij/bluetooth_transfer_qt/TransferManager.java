@@ -5,6 +5,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -24,7 +28,7 @@ import java.util.concurrent.Future;
 public class TransferManager {
     private static final String TAG = "TransferManager";
     private static final int BUFFER_SIZE = 8192;
-    private static final int PROGRESS_UPDATE_INTERVAL = 500; // ms
+    private static final int PROGRESS_UPDATE_INTERVAL = 500;
 
     private final Map<String, TransferTask> activeTransfers = new ConcurrentHashMap<>();
     private final ExecutorService executor;
@@ -239,12 +243,11 @@ public class TransferManager {
             totalBytes = file.length();
             transferredBytes = 0;
 
-            // Send file info header
             sendFileHeader(file.getName(), totalBytes);
 
             try (FileInputStream fis = new FileInputStream(file);
                  OutputStream os = socket.getOutputStream()) {
-
+                
                 byte[] buffer = new byte[BUFFER_SIZE];
                 int bytesRead;
                 long lastProgressUpdate = 0;
@@ -252,9 +255,9 @@ public class TransferManager {
                 while ((bytesRead = fis.read(buffer)) != -1 && !cancelled) {
                     os.write(buffer, 0, bytesRead);
                     os.flush();
+                    
                     transferredBytes += bytesRead;
 
-                    // Update progress periodically
                     long currentTime = System.currentTimeMillis();
                     if (currentTime - lastProgressUpdate > PROGRESS_UPDATE_INTERVAL) {
                         notifyProgress();
@@ -266,7 +269,6 @@ public class TransferManager {
                     notifyCancelled();
                     onTransferCancelled(transferId);
                 } else {
-                    // Final progress update
                     notifyProgress();
                     notifyCompleted(file.getAbsolutePath());
                     onTransferCompleted(transferId);
@@ -279,13 +281,9 @@ public class TransferManager {
                 throw new IOException("Socket not connected");
             }
 
-            // Send download request
-            sendDownloadRequest(remoteFileName);
-
             try (InputStream is = socket.getInputStream();
                  FileOutputStream fos = new FileOutputStream(file)) {
 
-                // Read file header first
                 FileHeader header = readFileHeader(is);
                 totalBytes = header.fileSize;
                 transferredBytes = 0;
@@ -305,7 +303,6 @@ public class TransferManager {
                     fos.write(buffer, 0, bytesRead);
                     transferredBytes += bytesRead;
 
-                    // Update progress periodically
                     long currentTime = System.currentTimeMillis();
                     if (currentTime - lastProgressUpdate > PROGRESS_UPDATE_INTERVAL) {
                         notifyProgress();
@@ -314,14 +311,12 @@ public class TransferManager {
                 }
 
                 if (cancelled) {
-                    // Delete partial file
                     if (file.exists()) {
                         file.delete();
                     }
                     notifyCancelled();
                     onTransferCancelled(transferId);
                 } else {
-                    // Final progress update
                     notifyProgress();
                     notifyCompleted(file.getAbsolutePath());
                     onTransferCompleted(transferId);
@@ -330,66 +325,16 @@ public class TransferManager {
         }
 
         private void sendFileHeader(String fileName, long fileSize) throws IOException {
-            OutputStream os = socket.getOutputStream();
-            
-            // Protocol: HEADER|filename_length|filename|file_size
-            String header = "FILE_HEADER";
-            os.write(header.getBytes());
-            os.write((byte) fileName.length());
-            os.write(fileName.getBytes());
-            
-            // Write file size as 8 bytes (long)
-            byte[] sizeBytes = new byte[8];
-            for (int i = 0; i < 8; i++) {
-                sizeBytes[i] = (byte) (fileSize >> (8 * (7 - i)));
-            }
-            os.write(sizeBytes);
-            os.flush();
+            DataOutputStream outputStream = new DataOutputStream(socket.getOutputStream());
+            outputStream.writeLong(fileSize);
+            outputStream.flush();
         }
 
-        private void sendDownloadRequest(String fileName) throws IOException {
-            OutputStream os = socket.getOutputStream();
-            
-            // Protocol: DOWNLOAD_REQUEST|filename_length|filename
-            String header = "DOWNLOAD_REQUEST";
-            os.write(header.getBytes());
-            os.write((byte) fileName.length());
-            os.write(fileName.getBytes());
-            os.flush();
-        }
 
         private FileHeader readFileHeader(InputStream is) throws IOException {
-            // Read header type
-            byte[] headerBytes = new byte[11]; // "FILE_HEADER".length()
-            if (is.read(headerBytes) != 11 || !new String(headerBytes).equals("FILE_HEADER")) {
-                throw new IOException("Invalid file header");
-            }
-
-            // Read filename length
-            int fileNameLength = is.read();
-            if (fileNameLength <= 0) {
-                throw new IOException("Invalid filename length");
-            }
-
-            // Read filename
-            byte[] fileNameBytes = new byte[fileNameLength];
-            if (is.read(fileNameBytes) != fileNameLength) {
-                throw new IOException("Failed to read filename");
-            }
-            String fileName = new String(fileNameBytes);
-
-            // Read file size
-            byte[] sizeBytes = new byte[8];
-            if (is.read(sizeBytes) != 8) {
-                throw new IOException("Failed to read file size");
-            }
-
-            long fileSize = 0;
-            for (int i = 0; i < 8; i++) {
-                fileSize = (fileSize << 8) | (sizeBytes[i] & 0xFF);
-            }
-
-            return new FileHeader(fileName, fileSize);
+            DataInputStream inputStream = new DataInputStream(is);
+            long fileSize = inputStream.readLong();
+            return new FileHeader("unknown", fileSize);
         }
 
         private void notifyProgress() {

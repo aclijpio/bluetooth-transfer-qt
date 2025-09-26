@@ -9,8 +9,8 @@ import 'models/transfer_progress.dart';
 typedef DeviceDiscoveredCallback = void Function(BluetoothDevice device);
 typedef TransferProgressCallback = void Function(TransferProgress progress);
 typedef MessageReceivedCallback = void Function(BluetoothMessage message);
-typedef ConnectionStateCallback =
-    void Function(String deviceAddress, bool isConnected);
+typedef ConnectionStateCallback = void Function(
+    String deviceAddress, bool isConnected);
 typedef ErrorCallback = void Function(String error);
 
 abstract class BluetoothTransferQtPlatform extends PlatformInterface {
@@ -150,6 +150,19 @@ abstract class BluetoothTransferQtPlatform extends PlatformInterface {
   Future<bool> checkPermissions() {
     throw UnimplementedError('checkPermissions() has not been implemented.');
   }
+
+  void setClientCallbacks({
+    MessageReceivedCallback? onMessageReceived,
+    ConnectionStateCallback? onConnectionChanged,
+    ErrorCallback? onError,
+  }) {
+    throw UnimplementedError('setClientCallbacks() has not been implemented.');
+  }
+
+  void clearClientCallbacks() {
+    throw UnimplementedError(
+        'clearClientCallbacks() has not been implemented.');
+  }
 }
 
 class BluetoothMessage {
@@ -181,7 +194,9 @@ class BluetoothMessage {
       data: json['data'] != null
           ? Uint8List.fromList(List<int>.from(json['data']))
           : null,
-      metadata: json['metadata'] as Map<String, dynamic>?,
+      metadata: json['metadata'] != null && json['metadata'] is Map
+          ? Map<String, dynamic>.from(json['metadata'])
+          : null,
     );
   }
 }

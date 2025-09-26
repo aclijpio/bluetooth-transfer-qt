@@ -207,9 +207,10 @@ public class BluetoothTransferQtPlugin implements FlutterPlugin, MethodCallHandl
                     result.success(checkPermissions());
                     break;
                     
+                case "startScan":
                 case "scanForDevices":
-                    Integer timeout = call.argument("timeout");
-                    scanForDevices(timeout, result);
+                    Integer timeoutMs = call.argument("timeoutMs");
+                    scanForDevices(timeoutMs, result);
                     break;
                     
                 case "stopScan":
@@ -218,12 +219,12 @@ public class BluetoothTransferQtPlugin implements FlutterPlugin, MethodCallHandl
                     break;
                     
                 case "connectToDevice":
-                    String deviceAddress = call.argument("deviceAddress");
+                    String deviceAddress = call.argument("address");
                     connectToDevice(deviceAddress, result);
                     break;
                     
                 case "disconnectFromDevice":
-                    String disconnectAddress = call.argument("deviceAddress");
+                    String disconnectAddress = call.argument("address");
                     result.success(disconnectFromDevice(disconnectAddress));
                     break;
                     
@@ -298,6 +299,27 @@ public class BluetoothTransferQtPlugin implements FlutterPlugin, MethodCallHandl
                     isServerRunning(result);
                     break;
                     
+                case "isBluetoothSupported":
+                    result.success(bluetoothAdapter != null);
+                    break;
+                    
+                case "getBondedDevices":
+                    getBondedDevices(result);
+                    break;
+                    
+                case "sendRawData":
+                    String rawDataAddress = call.argument("deviceAddress");
+                    byte[] rawData = call.argument("data");
+                    sendRawData(rawDataAddress, rawData, result);
+                    break;
+                    
+                case "sendCommand":
+                    String commandAddress = call.argument("address");
+                    String command = call.argument("command");
+                    sendCommand(commandAddress, command, result);
+                    break;
+                    
+                    
                 default:
       result.notImplemented();
             }
@@ -346,10 +368,8 @@ public class BluetoothTransferQtPlugin implements FlutterPlugin, MethodCallHandl
         if (bluetoothAdapter == null) return false;
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                // If we lack BLUETOOTH_CONNECT, isEnabled() may throw; catch below
                 if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
                     != PackageManager.PERMISSION_GRANTED) {
-                    // Best effort: still attempt isEnabled(); if it throws, we'll catch
                 }
             }
             return bluetoothAdapter.isEnabled();
@@ -364,7 +384,6 @@ public class BluetoothTransferQtPlugin implements FlutterPlugin, MethodCallHandl
         if (isBluetoothEnabled()) return true;
 
         try {
-            // Prefer system dialog which works for non-privileged apps
             if (activityBinding != null && activityBinding.getActivity() != null) {
                 Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
                 activityBinding.getActivity().startActivityForResult(enableBtIntent, 2001);
@@ -373,8 +392,6 @@ public class BluetoothTransferQtPlugin implements FlutterPlugin, MethodCallHandl
         } catch (Exception e) {
             Log.w(TAG, "Failed to launch enable BT intent, falling back to adapter.enable()", e);
         }
-
-        // Fallback: may be ignored on newer Android versions but works on older ones
         try {
             return bluetoothAdapter.enable();
         } catch (SecurityException e) {
@@ -441,20 +458,98 @@ public class BluetoothTransferQtPlugin implements FlutterPlugin, MethodCallHandl
     }
 
     private void sendFile(String deviceAddress, String filePath, Result result) {
-        String transferId = serverManager.sendFile(deviceAddress, filePath);
-        if (transferId != null) {
-            result.success(true);
-        } else {
-            result.error("TRANSFER_FAILED", "Failed to start file transfer", null);
+        Log.d(TAG, "Sending file: " + filePath + " to " + deviceAddress);
+        try {
+            BluetoothSocket socket = connectionManager.getConnection(deviceAddress);
+            if (socket == null) {
+                result.error("NO_CONNECTION", "No connection to device: " + deviceAddress, null);
+                return;
+            }
+            String transferId = "transfer_" + System.currentTimeMillis();
+
+            // Pause background reader to avoid concurrent reads during transfer
+            connectionManager.pauseReading(deviceAddress);
+
+            String startedId = transferManager.startFileUpload(socket, filePath, new TransferManager.TransferProgressListener() {
+                @Override
+                public void onProgress(String taskId, String fName, long totalBytes, long transferredBytes, double percentage) {
+                    // Progress is already emitted by TransferManager; avoid duplicate events
+                }
+
+                @Override
+                public void onCompleted(String taskId, String fName, String fPath) {
+                    connectionManager.resumeReading(deviceAddress);
+                }
+
+                @Override
+                public void onFailed(String taskId, String fName, String error) {
+                    sendErrorEvent("File upload failed: " + error);
+                    connectionManager.resumeReading(deviceAddress);
+                }
+
+                @Override
+                public void onCancelled(String taskId, String fName) {
+                    connectionManager.resumeReading(deviceAddress);
+                }
+            });
+
+            if (startedId != null) {
+                result.success(true);
+            } else {
+                connectionManager.resumeReading(deviceAddress);
+                result.error("SEND_FAILED", "Failed to start file upload", null);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error sending file", e);
+            result.error("SEND_ERROR", e.getMessage(), null);
         }
     }
 
     private void downloadFile(String deviceAddress, String fileName, String savePath, Result result) {
-        String transferId = clientManager.requestFile(deviceAddress, fileName, savePath);
-        if (transferId != null) {
-            result.success(true);
-        } else {
-            result.error("DOWNLOAD_FAILED", "Failed to start file download", null);
+        Log.d(TAG, "Downloading file: " + fileName + " from " + deviceAddress + " to " + savePath);
+        try {
+            BluetoothSocket socket = connectionManager.getConnection(deviceAddress);
+            if (socket == null) {
+                result.error("NO_CONNECTION", "No connection to device: " + deviceAddress, null);
+                return;
+            }
+            String transferId = "transfer_" + System.currentTimeMillis();
+
+            // Pause background reader to avoid concurrent reads during transfer
+            connectionManager.pauseReading(deviceAddress);
+
+            String startedId = transferManager.startFileDownload(socket, fileName, savePath, new TransferManager.TransferProgressListener() {
+                @Override
+                public void onProgress(String taskId, String fName, long totalBytes, long transferredBytes, double percentage) {
+                    // Progress is already emitted by TransferManager; avoid duplicate events
+                }
+
+                @Override
+                public void onCompleted(String taskId, String fName, String fPath) {
+                    connectionManager.resumeReading(deviceAddress);
+                }
+
+                @Override
+                public void onFailed(String taskId, String fName, String error) {
+                    sendErrorEvent("File download failed: " + error);
+                    connectionManager.resumeReading(deviceAddress);
+                }
+
+                @Override
+                public void onCancelled(String taskId, String fName) {
+                    connectionManager.resumeReading(deviceAddress);
+                }
+            });
+
+            if (startedId != null) {
+                result.success(true);
+            } else {
+                connectionManager.resumeReading(deviceAddress);
+                result.error("DOWNLOAD_FAILED", "Failed to start file download", null);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error downloading file", e);
+            result.error("DOWNLOAD_ERROR", e.getMessage(), null);
         }
     }
 
@@ -590,7 +685,6 @@ public class BluetoothTransferQtPlugin implements FlutterPlugin, MethodCallHandl
             String[] permissions = {
                 Manifest.permission.BLUETOOTH,
                 Manifest.permission.BLUETOOTH_ADMIN,
-                // Accept coarse or fine on pre-S for discovery
                 Manifest.permission.ACCESS_COARSE_LOCATION,
                 Manifest.permission.ACCESS_FINE_LOCATION
             };
@@ -612,6 +706,7 @@ public class BluetoothTransferQtPlugin implements FlutterPlugin, MethodCallHandl
         }
     }
 
+
     private boolean checkPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             return ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
@@ -627,7 +722,6 @@ public class BluetoothTransferQtPlugin implements FlutterPlugin, MethodCallHandl
         }
     }
 
-    // ActivityAware implementation
     @Override
     public void onAttachedToActivity(@NonNull ActivityPluginBinding binding) {
         this.activityBinding = binding;
@@ -637,6 +731,50 @@ public class BluetoothTransferQtPlugin implements FlutterPlugin, MethodCallHandl
     public void onDetachedFromActivityForConfigChanges() {
         this.activityBinding = null;
     }
+    
+    private void getBondedDevices(Result result) {
+        try {
+            if (bluetoothAdapter == null) {
+                result.success(new ArrayList<>());
+                return;
+            }
+            
+            Set<BluetoothDevice> bondedDevices = bluetoothAdapter.getBondedDevices();
+            List<Map<String, Object>> deviceList = new ArrayList<>();
+            
+            for (BluetoothDevice device : bondedDevices) {
+                Map<String, Object> deviceMap = new HashMap<>();
+                deviceMap.put("address", device.getAddress());
+                deviceMap.put("name", device.getName());
+                deviceMap.put("type", "classic");
+                deviceMap.put("bondState", "bonded");
+                deviceList.add(deviceMap);
+            }
+            
+            result.success(deviceList);
+        } catch (SecurityException e) {
+            Log.e(TAG, "SecurityException getting bonded devices", e);
+            result.success(new ArrayList<>());
+        }
+    }
+    
+    private void sendRawData(String deviceAddress, byte[] data, Result result) {
+        // TODO: Implement raw data sending
+        Log.w(TAG, "sendRawData not yet implemented");
+        result.success(false);
+    }
+    
+    private void sendCommand(String deviceAddress, String command, Result result) {
+        try {
+            // Send command as UTF-8 string through connection manager
+            boolean success = connectionManager.sendCommand(deviceAddress, command);
+            result.success(success);
+        } catch (Exception e) {
+            Log.e(TAG, "Error sending command", e);
+            result.error("SEND_COMMAND_ERROR", e.getMessage(), null);
+        }
+    }
+    
 
     @Override
     public void onReattachedToActivityForConfigChanges(@NonNull ActivityPluginBinding binding) {

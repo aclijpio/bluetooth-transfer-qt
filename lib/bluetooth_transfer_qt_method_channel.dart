@@ -24,6 +24,10 @@ class MethodChannelBluetoothTransferQt extends BluetoothTransferQtPlatform {
   StreamSubscription<dynamic>? _eventSubscription;
   final Map<String, StreamController<List<int>>> _rawDataStreams = {};
 
+  static MessageReceivedCallback? _staticClientMessageCallback;
+  static ConnectionStateCallback? _staticClientConnectionCallback;
+  static ErrorCallback? _staticClientErrorCallback;
+
   MethodChannelBluetoothTransferQt() {
     _setupEventChannel();
   }
@@ -91,10 +95,27 @@ class MethodChannelBluetoothTransferQt extends BluetoothTransferQtPlatform {
             _messageReceivedCallback!(message);
           }
         }
+        if (_staticClientMessageCallback != null) {
+          final data = _toStringKeyedMap(eventMap['data']);
+          if (data != null) {
+            final message = BluetoothMessage.fromJson(data);
+            _staticClientMessageCallback!(message);
+          }
+        }
         break;
       case 'rawDataReceived':
         final deviceAddress = eventMap['deviceAddress'] as String?;
-        final rawData = eventMap['data'] as List<dynamic>?;
+        final data = eventMap['data'];
+
+        List<dynamic>? rawData;
+        if (data is List<dynamic>) {
+          rawData = data;
+        } else if (data is Map) {
+          rawData = data['rawData'] as List<dynamic>? ??
+              data['data'] as List<dynamic>? ??
+              data['bytes'] as List<dynamic>?;
+        }
+
         if (deviceAddress != null &&
             rawData != null &&
             _rawDataStreams.containsKey(deviceAddress)) {
@@ -103,16 +124,24 @@ class MethodChannelBluetoothTransferQt extends BluetoothTransferQtPlatform {
         }
         break;
       case 'connectionStateChanged':
+        final deviceAddress = eventMap['deviceAddress'] as String? ?? '';
+        final isConnected = eventMap['isConnected'] as bool? ?? false;
+
         if (_connectionStateCallback != null) {
-          final deviceAddress = eventMap['deviceAddress'] as String? ?? '';
-          final isConnected = eventMap['isConnected'] as bool? ?? false;
           _connectionStateCallback!(deviceAddress, isConnected);
+        }
+        if (_staticClientConnectionCallback != null) {
+          _staticClientConnectionCallback!(deviceAddress, isConnected);
         }
         break;
       case 'error':
+        final error = eventMap['error'] as String? ?? 'Unknown error';
+
         if (_errorCallback != null) {
-          final error = eventMap['error'] as String? ?? 'Unknown error';
           _errorCallback!(error);
+        }
+        if (_staticClientErrorCallback != null) {
+          _staticClientErrorCallback!(error);
         }
         break;
     }
@@ -372,5 +401,39 @@ class MethodChannelBluetoothTransferQt extends BluetoothTransferQtPlatform {
       controller.close();
     }
     _rawDataStreams.clear();
+  }
+
+  static void setStaticClientCallbacks({
+    MessageReceivedCallback? onMessageReceived,
+    ConnectionStateCallback? onConnectionChanged,
+    ErrorCallback? onError,
+  }) {
+    _staticClientMessageCallback = onMessageReceived;
+    _staticClientConnectionCallback = onConnectionChanged;
+    _staticClientErrorCallback = onError;
+  }
+
+  static void clearStaticClientCallbacks() {
+    _staticClientMessageCallback = null;
+    _staticClientConnectionCallback = null;
+    _staticClientErrorCallback = null;
+  }
+
+  @override
+  void setClientCallbacks({
+    MessageReceivedCallback? onMessageReceived,
+    ConnectionStateCallback? onConnectionChanged,
+    ErrorCallback? onError,
+  }) {
+    setStaticClientCallbacks(
+      onMessageReceived: onMessageReceived,
+      onConnectionChanged: onConnectionChanged,
+      onError: onError,
+    );
+  }
+
+  @override
+  void clearClientCallbacks() {
+    clearStaticClientCallbacks();
   }
 }

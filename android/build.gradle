@@ -1,28 +1,35 @@
 group = "pio.aclij.bluetooth_transfer_qt"
 version = "1.0"
 
-def localProperties = new Properties()
-def localPropertiesFile = rootProject.file('local.properties')
-if (localPropertiesFile.exists()) {
-    localProperties.load(localPropertiesFile.newDataInputStream())
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.9.1")
+    }
 }
 
-def flutterRoot = localProperties.getProperty('flutter.sdk')
-if (flutterRoot == null) {
-    throw new GradleException("Flutter SDK not found. Define location with flutter.sdk in the local.properties file.")
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
 }
 
-apply plugin: 'com.android.library'
-apply from: "$flutterRoot/packages/flutter_tools/gradle/flutter.gradle"
+apply plugin: "com.android.library"
 
 android {
     namespace = "pio.aclij.bluetooth_transfer_qt"
 
-    compileSdk = 34
+    compileSdk = 36
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+        coreLibraryDesugaringEnabled true
     }
 
     defaultConfig {
@@ -40,11 +47,8 @@ android {
     }
 }
 
-flutter {
-    source = "../.."
-}
-
 dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.2")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.mockito:mockito-core:5.0.0")
 }

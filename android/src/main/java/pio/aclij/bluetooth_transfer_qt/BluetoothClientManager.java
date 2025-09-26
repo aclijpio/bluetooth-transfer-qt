@@ -116,8 +116,8 @@ public class BluetoothClientManager {
         isScanning.set(true);
 
         try {
-            addPairedDevices();
-
+            // Only discover new devices during scan, not paired ones
+            // Paired devices should be retrieved separately via getBondedDevices()
             setupDiscoveryReceiver();
             boolean started = false;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ECLAIR) {
@@ -135,6 +135,7 @@ public class BluetoothClientManager {
             mainHandler.postDelayed(this::stopScan, timeout);
 
             Log.d(TAG, "Started Bluetooth scan with timeout: " + timeout + "ms");
+            Log.d(TAG, "Discovered devices cleared, starting with " + discoveredDevices.size() + " devices");
             return true;
 
         } catch (SecurityException e) {
@@ -175,22 +176,22 @@ public class BluetoothClientManager {
     }
 
     public CompletableFuture<Boolean> connectToDevice(String deviceAddress) {
-        CompletableFuture<Boolean> future = null;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            future = new CompletableFuture<>();
+        final CompletableFuture<Boolean> future = new CompletableFuture<>();
+
+        if (deviceAddress == null || deviceAddress.isEmpty()) {
+            Log.e(TAG, "Device address is null or empty");
+            future.complete(false);
+            return future;
         }
 
         if (connectionManager.isConnected(deviceAddress)) {
             Log.d(TAG, "Already connected to device: " + deviceAddress);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                future.complete(true);
-            }
+            future.complete(true);
             return future;
         }
 
         executor.submit(() -> {
             try {
-                // Cancel discovery to speed up and stabilize RFCOMM connect
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ECLAIR) {
                     try {
                         if (bluetoothAdapter.isDiscovering()) {
@@ -200,7 +201,6 @@ public class BluetoothClientManager {
                     }
                 }
 
-                // Permission checks for connect
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
                         != PackageManager.PERMISSION_GRANTED) {
@@ -367,6 +367,9 @@ public class BluetoothClientManager {
         return isScanning.get();
     }
 
+    // This method is not used during scanning to avoid mixing paired and discovered devices
+    // Paired devices should be retrieved separately via getBondedDevices()
+    @SuppressWarnings("unused")
     private void addPairedDevices() {
         boolean hasPermission;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -381,11 +384,14 @@ public class BluetoothClientManager {
         }
 
         Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
+        Log.d(TAG, "Found " + pairedDevices.size() + " paired devices");
         for (BluetoothDevice device : pairedDevices) {
             Map<String, Object> deviceMap = createDeviceMap(device);
             deviceMap.put("paired", true);
             discoveredDevices.add(deviceMap);
-            notifyDeviceDiscovered(deviceMap);
+            Log.d(TAG, "Added paired device: " + deviceMap);
+            // Don't send paired devices as discovered devices
+            // They should be retrieved separately via getBondedDevices()
         }
     }
 
@@ -396,7 +402,14 @@ public class BluetoothClientManager {
                 String action = intent.getAction();
                 
                 if (BluetoothDevice.ACTION_FOUND.equals(action)) {
-                    BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                    BluetoothDevice device;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice.class);
+                    } else {
+                        @SuppressWarnings("deprecation")
+                        BluetoothDevice d = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                        device = d;
+                    }
                     if (device != null) {
                         Map<String, Object> deviceMap = createDeviceMap(device);
                         
@@ -405,7 +418,10 @@ public class BluetoothClientManager {
                         
                         if (!alreadyFound) {
                             discoveredDevices.add(deviceMap);
+                            Log.d(TAG, "Device discovered: " + deviceMap);
                             notifyDeviceDiscovered(deviceMap);
+                        } else {
+                            Log.d(TAG, "Device already found: " + device.getAddress());
                         }
                     }
                 } else if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
@@ -435,10 +451,31 @@ public class BluetoothClientManager {
         }
         if (namePermission) {
             deviceMap.put("name", device.getName());
+        } else {
+            deviceMap.put("name", null);
         }
         
+        // Add device type
+        deviceMap.put("type", "classic");
+        
+        // Add bond state
+        int bondState = device.getBondState();
+        String bondStateStr;
+        switch (bondState) {
+            case BluetoothDevice.BOND_BONDED:
+                bondStateStr = "bonded";
+                break;
+            case BluetoothDevice.BOND_BONDING:
+                bondStateStr = "bonding";
+                break;
+            default:
+                bondStateStr = "none";
+                break;
+        }
+        deviceMap.put("bondState", bondStateStr);
+        
+        // Add connection status
         deviceMap.put("isConnected", connectionManager.isConnected(device.getAddress()));
-        deviceMap.put("paired", device.getBondState() == BluetoothDevice.BOND_BONDED);
         
         return deviceMap;
     }
